@@ -1,0 +1,91 @@
+services:
+  # PHP Service
+  app:
+    container_name: ${APP_NAME}_${APP_ENV}_app
+    build:
+      context: .
+      dockerfile: ./docker/php/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./:/var/www/
+      - ./.env:/var/www/.env
+    environment:
+      ROLE: app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - default
+
+  # Nginx Service
+  nginx:
+    container_name: ${APP_NAME}_${APP_ENV}_nginx
+    build:
+      context: .
+      dockerfile: ./docker/nginx/Dockerfile
+    restart: unless-stopped
+    networks:
+      - default
+      - proxynet
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+    volumes:
+      - ./:/var/www
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d
+
+  # MySQL Service
+  mysql:
+    container_name: ${APP_NAME}_${APP_ENV}_mysql
+    image: mariadb
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    healthcheck:
+      test: [ "CMD", "healthcheck.sh", "--connect", "--innodb_initialized" ]
+      start_period: 1m
+      start_interval: 10s
+      interval: 1m
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./docker/data/mysql/data:/var/lib/mysql/
+
+  # Redis
+  redis:
+    container_name: ${APP_NAME}_${APP_ENV}_redis
+    image: redis:alpine
+    command: redis-server --appendonly yes --replica-read-only no
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+    networks:
+      - default
+    volumes:
+      - ./docker/data/redis/data:/data
+
+  # PHPMyAdmin
+  phpmyadmin:
+    container_name: ${APP_NAME}_${APP_ENV}_phpmyadmin
+    image: phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "60000:80"
+    environment:
+      - UPLOAD_LIMIT=300M
+      - PMA_PORT=3306
+      - PMA_HOST=mysql
+    depends_on:
+      - mysql
+    networks:
+      - default
+      - proxynet
+
+networks:
+  proxynet:
+    name: proxy_network
